@@ -1,10 +1,10 @@
 #!/bin/bash
 #
 # NHAS Agent Builder - Build all binary variants
-# Output: /home/alien/Desktop/OSCP/NHAS/bin/exploits/
+# Output: /home/alien/Desktop/Tools/OSCP-nhas-ssh-server/bin/exploits/
 #
 
-NHAS_DIR="/home/alien/Desktop/OSCP/NHAS"
+NHAS_DIR="${NHAS_DIR:-/home/alien/Desktop/Tools/OSCP-nhas-ssh-server}"
 OUTPUT_DIR="$NHAS_DIR/bin/exploits"
 DEFAULT_PORT="3232"
 
@@ -82,7 +82,7 @@ if command -v upx &> /dev/null; then
     echo -e "${GREEN}[+]${NC} UPX found - will compress binaries"
 else
     echo -e "${YELLOW}[!]${NC} UPX not found - skipping compression"
-    echo -e "${GRAY}    Install: apt install upx${NC}"
+    echo -e "${GRAY}    Install: apt install upx  |  pacman -S upx  |  dnf install upx${NC}"
 fi
 
 echo ""

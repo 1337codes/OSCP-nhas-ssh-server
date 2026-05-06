@@ -35,7 +35,9 @@ fi
 
 TARGET_USER="${SUDO_USER:-$USER}"
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
-WORKSPACE="$TARGET_HOME/Desktop/OSCP/NHAS"
+# Workspace = this repo's directory. NHAS source is laid down alongside the
+# wrapper scripts. Override with WORKSPACE=/some/path before running.
+WORKSPACE="${WORKSPACE:-/home/alien/Desktop/Tools/OSCP-nhas-ssh-server}"
 NHAS_REPO="https://github.com/NHAS/reverse_ssh.git"
 GOBIN="$TARGET_HOME/go/bin"
 
@@ -58,11 +60,30 @@ run_go_as_user() {
 
 banner "NHAS reverse-SSH server installer"
 
-# ─── apt: Go + UPX + git ─────────────────────────────────────────────
+# ─── package manager: Go + UPX + git ─────────────────────────────────
 banner "Installing Go, UPX, and git"
-$SUDO apt-get update -qq
-$SUDO apt-get install -y -qq golang-go upx git
-ok "golang-go + upx + git installed"
+if command -v pacman &>/dev/null; then
+    # Arch / CachyOS / Manjaro
+    $SUDO pacman -Sy --needed --noconfirm go upx git
+    ok "go + upx + git installed (pacman)"
+elif command -v apt-get &>/dev/null; then
+    # Debian / Ubuntu / Kali
+    $SUDO apt-get update -qq
+    $SUDO apt-get install -y -qq golang-go upx git
+    ok "golang-go + upx + git installed (apt)"
+elif command -v dnf &>/dev/null; then
+    # Fedora / RHEL
+    $SUDO dnf install -y golang upx git
+    ok "golang + upx + git installed (dnf)"
+elif command -v zypper &>/dev/null; then
+    # openSUSE
+    $SUDO zypper --non-interactive install go upx git
+    ok "go + upx + git installed (zypper)"
+else
+    fail "No supported package manager found (apt-get, pacman, dnf, zypper)."
+    fail "Install Go (>=1.21), UPX, and git manually, then rerun."
+    exit 1
+fi
 
 # ─── verify Go version (NHAS needs >= 1.21) ──────────────────────────
 banner "Verifying Go version"
@@ -78,24 +99,27 @@ if [[ "$MAJOR" -lt 1 ]] || { [[ "$MAJOR" -eq 1 ]] && [[ "$MINOR" -lt 21 ]]; }; t
     exit 1
 fi
 
-# ─── NHAS source: clone or pull ──────────────────────────────────────
+# ─── NHAS source: clone into workspace alongside wrapper scripts ─────
+# The workspace is this repo's directory (it already has its own .git for
+# OSCP-nhas-ssh-server), so we never `git pull` here — that would touch
+# the wrong remote. To refresh NHAS source, delete go.mod and rerun.
 banner "Checking NHAS source at $WORKSPACE"
 
 if [[ -f "$WORKSPACE/go.mod" ]]; then
-    ok "NHAS source present — pulling latest"
-    run_as_user git -C "$WORKSPACE" pull --ff-only 2>&1 | tail -3
+    ok "NHAS source already present (delete $WORKSPACE/go.mod to refresh)"
 else
-    if [[ -d "$WORKSPACE" ]]; then
-        warn "$WORKSPACE exists but has no go.mod — need to clone NHAS source into it"
-        # Clone to temp dir, rsync over (preserves user's existing files)
-        TMP_CLONE=$(run_as_user mktemp -d)
-        run_as_user git clone --depth=1 "$NHAS_REPO" "$TMP_CLONE" && \
-            run_as_user rsync -a --ignore-existing "$TMP_CLONE/" "$WORKSPACE/" && \
-            run_as_user rm -rf "$TMP_CLONE" && \
-            ok "NHAS source merged into existing workspace"
+    run_as_user mkdir -p "$WORKSPACE"
+    TMP_CLONE=$(run_as_user mktemp -d)
+    if run_as_user git clone --depth=1 "$NHAS_REPO" "$TMP_CLONE"; then
+        # --exclude='.git' so we don't clobber OSCP-nhas-ssh-server's repo metadata
+        # --ignore-existing so wrapper scripts (nhas-build.sh etc.) are preserved
+        run_as_user rsync -a --ignore-existing --exclude='.git' "$TMP_CLONE/" "$WORKSPACE/"
+        run_as_user rm -rf "$TMP_CLONE"
+        ok "NHAS source merged into $WORKSPACE"
     else
-        run_as_user git clone --depth=1 "$NHAS_REPO" "$WORKSPACE"
-        ok "NHAS source cloned to $WORKSPACE"
+        run_as_user rm -rf "$TMP_CLONE"
+        fail "Failed to clone $NHAS_REPO — check network access"
+        exit 1
     fi
 fi
 
@@ -153,6 +177,36 @@ for rc in "$TARGET_HOME/.zshrc" "$TARGET_HOME/.bashrc"; do
         ok "Added ~/go/bin to PATH in $(basename $rc)"
     fi
 done
+
+# ─── nhasup alias (bash / zsh / fish) ────────────────────────────────
+banner "Installing 'nhasup' alias"
+NHASUP_TARGET="$WORKSPACE/nhas-start.sh"
+NHASUP_POSIX="alias nhasup='bash \"$NHASUP_TARGET\"'"
+NHASUP_FISH="alias nhasup 'bash \"$NHASUP_TARGET\"'"
+
+# bash + zsh: append to rc files if missing
+for rc in "$TARGET_HOME/.zshrc" "$TARGET_HOME/.bashrc"; do
+    [[ -f "$rc" ]] || continue
+    if grep -q '^alias nhasup=' "$rc" 2>/dev/null; then
+        ok "nhasup alias already in $(basename $rc)"
+    else
+        run_as_user bash -c "printf '\n# NHAS reverse-SSH server launcher\n%s\n' \"$NHASUP_POSIX\" >> '$rc'"
+        ok "Added nhasup alias to $(basename $rc)"
+    fi
+done
+
+# fish: drop into config.fish (created if needed)
+FISH_CFG_DIR="$TARGET_HOME/.config/fish"
+FISH_CFG="$FISH_CFG_DIR/config.fish"
+if command -v fish &>/dev/null || [[ -d "$FISH_CFG_DIR" ]] || [[ "$SHELL" == */fish ]]; then
+    run_as_user mkdir -p "$FISH_CFG_DIR"
+    if [[ -f "$FISH_CFG" ]] && grep -q '^alias nhasup ' "$FISH_CFG" 2>/dev/null; then
+        ok "nhasup alias already in config.fish"
+    else
+        run_as_user bash -c "printf '\n# NHAS reverse-SSH server launcher\n%s\n' \"$NHASUP_FISH\" >> '$FISH_CFG'"
+        ok "Added nhasup alias to config.fish"
+    fi
+fi
 
 # ─── configure ssh alias for `ssh rssh` ─────────────────────────────
 banner "Configuring SSH alias (ssh rssh → localhost:3232)"
@@ -245,8 +299,11 @@ echo -e "    ${C}Server:${N}     $WORKSPACE/bin/server"
 echo -e "    ${C}Exploits:${N}   $WORKSPACE/bin/exploits/"
 echo
 echo -e "${C}${B}Quick start:${N}"
-echo -e "    ${C}# Start the server (default port 3232):${N}"
-echo -e "    cd $WORKSPACE && ./bin/server -p 3232"
+echo -e "    ${C}# Launch the dashboard + server (after sourcing your shell rc):${N}"
+echo -e "    nhasup"
+echo
+echo -e "    ${C}# Or run it directly:${N}"
+echo -e "    bash $WORKSPACE/nhas-start.sh"
 echo
 echo -e "    ${C}# Build all client variants:${N}"
 echo -e "    cd $WORKSPACE && bash nhas-build.sh"

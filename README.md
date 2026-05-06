@@ -1,138 +1,165 @@
 # OSCP-nhas-ssh-server
 
-Bash helpers for managing an **NHAS reverse SSH server** lab workflow in authorized training and internal testing environments.
+Bash helpers for spinning up an [NHAS reverse_ssh](https://github.com/NHAS/reverse_ssh) lab — installer, multi-arch client builder, and an opinionated server-side dashboard. Built for OSCP-style training and authorized internal testing.
 
 > Use only on systems and networks you are explicitly authorized to administer or assess.
 
 ---
 
-## Overview
+## What's in the box
 
-`OSCP-nhas-ssh-server` is a small shell-based toolkit built around two main scripts:
-
-- `nhas-build.sh` — builds NHAS client binaries for multiple platforms and architectures
-- `nhas-start.sh` — prepares and launches the server-side workflow, inventories available agents, and prints a quick-reference dashboard
-
-The project is designed to make repeated NHAS setup faster by keeping build output, server startup, and agent selection in one place.
-
----
-
-## What it does
-
-At a high level, the repository helps you:
-
-- build NHAS client binaries for common target platforms
-- choose between **direct** and **non-direct** client variants
-- configure callback IP/port values
-- organize generated binaries under a single output directory
-- authorize the bundled client public key for server-side use
-- launch a reverse-SSH “catcher” style workflow from a fixed workspace
-- display ready-to-use reference output for connecting to enrolled clients
+| Script | Purpose |
+| --- | --- |
+| `setup-nhas.sh` | One-shot installer: pulls deps, clones NHAS source, compiles `bin/server`, installs `garble`, drops a `nhasup` alias, configures `ssh rssh` shortcut. |
+| `nhas-build.sh` | Interactive multi-platform client builder (Linux/Windows/macOS, x86/ARM). Supports UPX compression and `garble` obfuscation when present. |
+| `nhas-start.sh` | Dashboard wrapper: discovers your IP, lists compiled agents, prints ready-to-paste delivery one-liners (curl/wget/certutil/bitsadmin/etc.), then launches the server. |
 
 ---
 
-## Repository structure
+## Requirements
 
-- `nhas-build.sh`
-  - interactive builder for NHAS client binaries
-  - outputs compiled artifacts to the local exploits/binaries directory
-  - supports optional compression and optional obfuscation if supporting tools are installed
+- Linux host (tested on Kali/Debian/Ubuntu and **CachyOS / Arch**)
+- Go ≥ 1.21
+- `git`, `upx`, `rsync`
+- Optional: `garble` (auto-installed by `setup-nhas.sh` to `~/go/bin/`)
 
-- `nhas-start.sh`
-  - startup/dashboard wrapper for the NHAS server workflow
-  - discovers local interface/IP values
-  - lists available compiled agents
-  - records the bundled client public key into the authorized key file if needed
-  - prints reference material for the catcher console and client selection
+The installer auto-detects your package manager and uses whichever is available:
+
+| Distro family | Package manager used |
+| --- | --- |
+| Debian / Ubuntu / Kali | `apt-get` |
+| Arch / CachyOS / Manjaro | `pacman` |
+| Fedora / RHEL | `dnf` |
+| openSUSE | `zypper` |
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/1337codes/OSCP-nhas-ssh-server.git ~/Desktop/Tools/OSCP-nhas-ssh-server
+cd ~/Desktop/Tools/OSCP-nhas-ssh-server
+sudo bash setup-nhas.sh
+```
+
+Open a new shell (or `source` your rc file), then:
+
+```bash
+nhasup           # launches the dashboard + server
+```
+
+That's the whole loop. To rebuild client agents:
+
+```bash
+bash nhas-build.sh
+```
+
+---
+
+## Workspace layout
+
+The workspace is the repo directory itself — NHAS source code is rsynced in alongside the wrapper scripts:
+
+```text
+/home/<you>/Desktop/Tools/OSCP-nhas-ssh-server/
+├── setup-nhas.sh                ← installer
+├── nhas-build.sh                ← client builder
+├── nhas-start.sh                ← dashboard / launcher
+├── go.mod, cmd/, internal/, …   ← NHAS upstream source (gitignored)
+└── bin/
+    ├── server                   ← compiled NHAS server
+    ├── authorized_keys          ← admin pubkeys (you)
+    ├── authorized_controllee_keys ← client pubkey (auto-added)
+    └── exploits/                ← built client agents
+```
+
+To override the workspace location, export `WORKSPACE` (for `setup-nhas.sh`) or `NHAS_DIR` (for the wrappers) before running.
 
 ---
 
 ## Agent model
 
-The scripts distinguish between two client styles:
+Two flavors of client are built:
 
-### Direct agents
-These have the callback destination compiled in.
+- **Direct agents** — callback `host:port` is compiled into the binary. Run with no arguments. Simplest for fixed-target labs.
+- **Non-direct agents** — callback destination is supplied at runtime. More flexible when the catcher endpoint changes between runs.
 
-Best when:
-- you want the simplest operator experience
-- the callback endpoint is fixed for the engagement/lab
-
-### Non-direct agents
-These require the destination to be provided at runtime.
-
-Best when:
-- you want more flexibility
-- the callback endpoint may change between runs
+`nhas-build.sh` produces both flavors for every selected platform.
 
 ---
 
 ## Build coverage
 
-From the build script, the project supports generating binaries for:
+`nhas-build.sh` can produce binaries for:
 
-- Linux amd64
-- Linux 386
-- Linux ARM64
-- Linux ARMv7
-- Linux ARMv6
-- Windows amd64
-- Windows 386
-- macOS amd64
-- macOS ARM64
+- Linux: amd64, 386, arm64, armv7, armv6
+- Windows: amd64, 386
+- macOS: amd64, arm64
 
-It also supports optional variants such as:
+Optional variants per build:
 
-- compressed builds
-- obfuscated builds
-- direct builds with baked-in callback values
-- non-direct builds for runtime destination selection
+- UPX-compressed (when `upx` is installed)
+- `garble`-obfuscated (when `garble` is in `~/go/bin`)
+- Direct (baked-in callback) and non-direct (runtime callback)
 
 ---
 
-## Build workflow
+## What the dashboard gives you
 
-The builder script is an interactive helper that:
+`nhas-start.sh` (aliased to `nhasup`) auto-detects your active interface IP, then prints a numbered menu of copy-paste-ready delivery one-liners for each enrolled platform — `wget`, `curl`, `certutil`, `bitsadmin`, PowerShell `IWR`, systemd-user persistence, etc. — wired to the agents it found in `bin/exploits/`. After printing the cheat sheet it `exec`s `bin/server`, so the same terminal becomes the catcher console.
 
-- asks for interface/IP
-- asks for callback IP and callback port
-- verifies the NHAS source tree is present
-- creates the output directory if needed
-- checks for optional tooling:
-  - `upx`
-  - `garble`
-- compiles the requested families of binaries
-- prints a results summary at the end
+Connect to a callback once it lands:
 
-This makes it useful as a one-command “build everything I might need” helper for a lab workspace.
+```bash
+ssh rssh                       # admin console (alias added by setup-nhas.sh)
+ssh    -J rssh <client-id>     # Linux target
+ssh -tt -J rssh <client-id>    # Windows target (use -tt to avoid ConPTY buffer issues)
+```
 
----
+List enrolled clients from inside the admin console:
 
-## Startup workflow
-
-The startup script is a dashboard-oriented launcher that:
-
-- sets a fixed NHAS working directory
-- discovers the active interface/IP
-- prompts for callback and HTTP download ports
-- lets you choose Linux and Windows agent defaults
-- scans the local exploits directory and lists matching binaries with size/type hints
-- auto-appends the bundled client public key to the authorized key file if it is not already present
-- prints a compact operator reference for the server-side SSH console
+```
+ls -t
+```
 
 ---
 
-## Output layout
+## What `setup-nhas.sh` actually does
 
-The scripts expect a workspace similar to:
+1. Detects your package manager and installs Go, UPX, git.
+2. Verifies Go ≥ 1.21.
+3. Clones `NHAS/reverse_ssh` to a temp dir and rsyncs the source into the workspace, excluding `.git` and preserving the wrapper scripts.
+4. Builds `bin/server` with `-trimpath -ldflags='-s -w'`.
+5. Installs `garble` to `~/go/bin/` (as your user, not root).
+6. Adds `~/go/bin` to `PATH` in `~/.bashrc` and `~/.zshrc`.
+7. Adds `nhasup` alias to `~/.bashrc`, `~/.zshrc`, **and** `~/.config/fish/config.fish`.
+8. Generates an ed25519 keypair if you don't have one, and authorizes its public key in `bin/authorized_keys`.
+9. Adds `Host rssh → 127.0.0.1:3232` to `~/.ssh/config`.
 
-```text
-/home/alien/Desktop/OSCP/NHAS/
-├── bin/
-│   ├── server
-│   ├── authorized_controllee_keys
-│   └── exploits/
-├── internal/
-│   └── client/
-│       └── keys/
-└── nhas-build.sh
+Re-running is safe — every step is idempotent.
+
+To refresh the NHAS upstream source later:
+
+```bash
+rm go.mod && sudo bash setup-nhas.sh
+```
+
+---
+
+## Troubleshooting
+
+**`nhasup: command not found`** — your shell was started before the alias existed. `source ~/.config/fish/config.fish` (or your bash/zsh equivalent), or open a new terminal.
+
+**`ssh rssh` says "not authorized"** — restart `bin/server` after `setup-nhas.sh` ran; admin keys are loaded once at startup.
+
+**Server build fails with old Go** — Arch usually ships current Go via `pacman`; on Debian-derived distros older `golang-go` packages may be too old. Install the latest from [go.dev/dl](https://go.dev/dl/) and rerun.
+
+**`garble` install failed** — obfuscated builds will be skipped silently by `nhas-build.sh`. Retry as your user (not root): `go install mvdan.cc/garble@latest`.
+
+---
+
+## Disclaimer
+
+This project does not modify NHAS itself; it just orchestrates installation, builds, and operator UX around it. All credit for the underlying reverse-SSH implementation goes to [NHAS/reverse_ssh](https://github.com/NHAS/reverse_ssh).
+
+Use only against systems you are explicitly authorized to test.

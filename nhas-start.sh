@@ -9,6 +9,7 @@ EXPLOIT_DIR="$NHAS_DIR/bin/exploits"
 SERVER_BIN="$DATA_DIR/server"
 CLIENT_PUBKEY="$NHAS_DIR/internal/client/keys/private_key.pub"
 AUTH_KEYS="$DATA_DIR/authorized_controllee_keys"
+TOOLS_SCRIPT="$NHAS_DIR/nhas-tools.sh"   # thin wrapper — replace tools.py freely without touching this script
 DEFAULT_PORT="3232"
 DEFAULT_HTTP_PORT="80"
 
@@ -298,16 +299,23 @@ _LINUX_BAK=""; _WIN_BAK=""
 [[ -f "${EXPLOIT_DIR}/nhasLinuxAmd64Direct" ]]   && _LINUX_BAK="${TEMP_DIR}/nhasLinuxAmd64Direct.bak"   && cp "${EXPLOIT_DIR}/nhasLinuxAmd64Direct"   "$_LINUX_BAK"
 [[ -f "${EXPLOIT_DIR}/nhasWinAmd64Direct.exe" ]] && _WIN_BAK="${TEMP_DIR}/nhasWinAmd64Direct.exe.bak" && cp "${EXPLOIT_DIR}/nhasWinAmd64Direct.exe" "$_WIN_BAK"
 
-trap "
+_nhas_cleanup() {
     echo ''
-    echo '${GREEN}[+]${NC} Restoring agents...'
-    if [[ -n '${_LINUX_BAK}' && -f '${_LINUX_BAK}' ]]; then mv '${_LINUX_BAK}' '${EXPLOIT_DIR}/nhasLinuxAmd64Direct' 2>/dev/null
-    else rm -f '${EXPLOIT_DIR}/nhasLinuxAmd64Direct'; fi
-    if [[ -n '${_WIN_BAK}' && -f '${_WIN_BAK}' ]]; then mv '${_WIN_BAK}' '${EXPLOIT_DIR}/nhasWinAmd64Direct.exe' 2>/dev/null
-    else rm -f '${EXPLOIT_DIR}/nhasWinAmd64Direct.exe'; fi
-    rm -rf '${TEMP_DIR}'
-    echo '${GREEN}[+]${NC} Done.'
-" EXIT INT TERM
+    # Stop the file server (tools.py / DualServe) if we started it
+    if [[ -n "${TOOLS_PID:-}" ]] && kill -0 "$TOOLS_PID" 2>/dev/null; then
+        echo "${GREEN}[+]${NC} Stopping file server (PID ${TOOLS_PID})..."
+        kill "$TOOLS_PID" 2>/dev/null
+        wait "$TOOLS_PID" 2>/dev/null
+    fi
+    echo "${GREEN}[+]${NC} Restoring agents..."
+    if [[ -n "$_LINUX_BAK" && -f "$_LINUX_BAK" ]]; then mv "$_LINUX_BAK" "${EXPLOIT_DIR}/nhasLinuxAmd64Direct" 2>/dev/null
+    else rm -f "${EXPLOIT_DIR}/nhasLinuxAmd64Direct"; fi
+    if [[ -n "$_WIN_BAK" && -f "$_WIN_BAK" ]]; then mv "$_WIN_BAK" "${EXPLOIT_DIR}/nhasWinAmd64Direct.exe" 2>/dev/null
+    else rm -f "${EXPLOIT_DIR}/nhasWinAmd64Direct.exe"; fi
+    rm -rf "${TEMP_DIR}"
+    echo "${GREEN}[+]${NC} Done."
+}
+trap _nhas_cleanup EXIT INT TERM
 
 _GO=""
 for _gpath in "$(command -v go 2>/dev/null)" "/usr/local/go/bin/go" "$HOME/go/bin/go" "/usr/bin/go"; do
@@ -535,6 +543,9 @@ echo "${BOLD}=============================================="
 echo "  QUICK CONNECT EXAMPLES"
 echo "==============================================${NC}"
 echo ""
+echo "  ${CYAN}# Open catcher console${NC}"
+echo "  ${YELLOW}ssh rssh${NC}"
+echo ""
 echo "  ${CYAN}# Linux target${NC}"
 echo "  ${YELLOW}ssh -J rssh <id>${NC}"
 echo ""
@@ -545,6 +556,27 @@ echo ""
 echo "  ${CYAN}# Example - replace id with yours from: ssh rssh -> ls -t${NC}"
 echo "  ${GREEN}ssh    -J rssh langeidvanrssh${NC}    ${GRAY}# Linux${NC}"
 echo "  ${GREEN}ssh -tt -J rssh langeidvanrssh${NC}   ${GRAY}# Windows${NC}"
+echo ""
+
+# ─── Launch file server (tools.py via nhas-tools.sh) ─────────────────────────
+TOOLS_PID=""
+if [[ -f "$TOOLS_SCRIPT" ]]; then
+    echo "${GREEN}[+]${NC} Starting file server → HTTP :${HTTP_PORT}  SMB :445  (share: evil)"
+    bash "$TOOLS_SCRIPT" "$EXPLOIT_DIR" "$HTTP_PORT" &
+    TOOLS_PID=$!
+    sleep 0.5
+    if ! kill -0 "$TOOLS_PID" 2>/dev/null; then
+        echo "${RED}[!]${NC} File server exited immediately — check tools.py / python3 output above"
+        TOOLS_PID=""
+    else
+        echo "${GREEN}[+]${NC} File server running (PID ${TOOLS_PID})"
+    fi
+else
+    echo "${YELLOW}[!]${NC} nhas-tools.sh not found at ${TOOLS_SCRIPT}"
+    echo "    Start manually in another terminal:"
+    echo "    ${YELLOW}python3 -m http.server ${HTTP_PORT} -d ${EXPLOIT_DIR}${NC}"
+    echo "    ${YELLOW}impacket-smbserver evil ${EXPLOIT_DIR} -smb2support${NC}"
+fi
 echo ""
 
 cd "$DATA_DIR" || exit 1

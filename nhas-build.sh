@@ -66,20 +66,22 @@ cd "$NHAS_DIR" || exit 1
 mkdir -p "$OUTPUT_DIR"
 
 # ─── Server host key → RSSH_FINGERPRINT ─────────────────────────────────────
-# The server generates bin/server_ed25519 on first run.  Clients MUST have
-# the matching SHA-256 fingerprint compiled in, otherwise they'll refuse the
-# connection with a host-key mismatch.  setup-nhas.sh pre-generates this key
-# so it's always available before a build is attempted.
-SERVER_KEY="$NHAS_DIR/bin/server_ed25519"
+# reverse_ssh server loads bin/id_ed25519 as its host key and prints the
+# fingerprint as a raw 64-char hex SHA256.  Clients must have the matching hex
+# fingerprint compiled in via RSSH_FINGERPRINT, otherwise they reject the server.
+# setup-nhas.sh pre-generates this key so it exists before any build is attempted.
+SERVER_KEY="$NHAS_DIR/bin/id_ed25519"
 if [[ -f "$SERVER_KEY" ]]; then
-    RSSH_FINGERPRINT=$(ssh-keygen -lf "$SERVER_KEY" 2>/dev/null | awk '{print $2}')
+    # ssh-keygen gives SHA256:base64 — convert to raw hex to match what the server expects
+    _FP_B64=$(ssh-keygen -lf "$SERVER_KEY" -E sha256 2>/dev/null | awk '{print $2}' | sed 's/SHA256://')
+    RSSH_FINGERPRINT=$(printf '%s==' "$_FP_B64" | base64 -d 2>/dev/null | xxd -p | tr -d '\n')
     if [[ -n "$RSSH_FINGERPRINT" ]]; then
         export RSSH_FINGERPRINT
         echo -e "${GREEN}[+]${NC} Server fingerprint: ${CYAN}${RSSH_FINGERPRINT}${NC}"
         echo -e "${GRAY}    Baked into every client — server identity verified on connect${NC}"
     else
-        echo -e "${RED}[!]${NC} Could not read fingerprint from $SERVER_KEY"
-        echo -e "${RED}[!]${NC} Clients will REJECT the server — run setup-nhas.sh to fix${NC}"
+        echo -e "${RED}[!]${NC} Could not convert fingerprint from $SERVER_KEY"
+        echo -e "${RED}[!]${NC} Ensure ssh-keygen and xxd are installed, then rerun${NC}"
     fi
 else
     echo -e "${RED}[!]${NC} Server key not found: $SERVER_KEY"

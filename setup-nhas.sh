@@ -150,44 +150,75 @@ else
 fi
 
 # ─── pre-generate server host key ────────────────────────────────────
-# The server creates this automatically on first run, but nhas-build.sh
-# needs the fingerprint at *compile time* so it can be baked into clients.
-# Generating it here guarantees builds always succeed even before the
-# server has been started for the first time.
-banner "Pre-generating server host key (needed for RSSH_FINGERPRINT)"
-SERVER_KEY="$WORKSPACE/bin/server_ed25519"
+# reverse_ssh server loads its host key from bin/id_ed25519 (not server_ed25519).
+# nhas-build.sh reads this key at compile time to embed RSSH_FINGERPRINT into
+# every client binary.  Without it, clients reject the server with a key mismatch.
+banner "Pre-generating server host key (bin/id_ed25519)"
+SERVER_KEY="$WORKSPACE/bin/id_ed25519"
 run_as_user mkdir -p "$(dirname "$SERVER_KEY")"
 
 if [[ -f "$SERVER_KEY" ]]; then
     ok "Server host key already exists at $SERVER_KEY"
 else
-    # Generate a standard ed25519 SSH host key — same format reverse_ssh expects
     run_as_user ssh-keygen -t ed25519 -N "" -f "$SERVER_KEY" -q
     if [[ -f "$SERVER_KEY" ]]; then
         ok "Server host key generated at $SERVER_KEY"
     else
-        fail "ssh-keygen failed — clients will not have a fingerprint to verify"
-        warn "Run manually: ssh-keygen -t ed25519 -N '' -f $SERVER_KEY"
+        fail "ssh-keygen failed — run manually: ssh-keygen -t ed25519 -N '' -f $SERVER_KEY"
+    fi
+fi
+# Remove the .pub sidecar — server only uses the private key file
+[[ -f "${SERVER_KEY}.pub" ]] && run_as_user rm -f "${SERVER_KEY}.pub"
+
+if [[ -f "$SERVER_KEY" ]]; then
+    # Convert SSH fingerprint from SHA256:base64 → raw hex (the format the server prints
+    # and RSSH_FINGERPRINT expects)
+    _FP_B64=$(ssh-keygen -lf "$SERVER_KEY" -E sha256 2>/dev/null | awk '{print $2}' | sed 's/SHA256://')
+    _FP_HEX=$(printf '%s==' "$_FP_B64" | base64 -d 2>/dev/null | xxd -p | tr -d '\n')
+    if [[ -n "$_FP_HEX" ]]; then
+        ok "Server fingerprint (hex): ${_FP_HEX}"
+        echo ""
+        echo -e "    ${C}RSSH_FINGERPRINT=${_FP_HEX}${N}"
+        echo -e "    ${Y}Baked into every client at build time — do NOT delete bin/id_ed25519${N}"
+        echo -e "    ${Y}To rotate: delete the key, rerun setup-nhas.sh, then rebuild all clients.${N}"
+    else
+        warn "Could not extract fingerprint — ensure ssh-keygen and xxd are installed"
     fi
 fi
 
-# Remove the .pub file ssh-keygen leaves behind; NHAS only uses the private key file
-# and having an extra .pub can confuse scripts that glob for keys.
-[[ -f "${SERVER_KEY}.pub" ]] && run_as_user rm -f "${SERVER_KEY}.pub"
+# ─── pre-generate client embed keypair ───────────────────────────────
+# reverse_ssh embeds a keypair into every client binary at build time from
+# internal/client/keys/private_key (no extension).  Without it every go build
+# fails with: pattern private_key: no matching files found
+banner "Pre-generating client embed keypair (internal/client/keys/private_key)"
+CLIENT_KEY_DIR="$WORKSPACE/internal/client/keys"
+CLIENT_KEY="$CLIENT_KEY_DIR/private_key"
+run_as_user mkdir -p "$CLIENT_KEY_DIR"
 
-# Display fingerprint so the operator can record it
-if [[ -f "$SERVER_KEY" ]]; then
-    FP=$(ssh-keygen -lf "$SERVER_KEY" 2>/dev/null | awk '{print $2}')
-    if [[ -n "$FP" ]]; then
-        ok "Server fingerprint: ${FP}"
-        echo ""
-        echo -e "    ${C}RSSH_FINGERPRINT=${FP}${N}"
-        echo -e "    ${Y}This fingerprint is baked into every client at build time.${N}"
-        echo -e "    ${Y}Do NOT delete $SERVER_KEY or clients from the current${N}"
-        echo -e "    ${Y}build batch will refuse to connect to the server.${N}"
-        echo -e "    ${Y}To rotate: delete the key, rerun setup-nhas.sh, then rebuild clients.${N}"
+if [[ -f "$CLIENT_KEY" ]]; then
+    ok "Client embed keypair already exists at $CLIENT_KEY"
+else
+    # Generate to a temp path then rename — ssh-keygen always writes .pub alongside
+    run_as_user ssh-keygen -t ed25519 -N "" -f "$CLIENT_KEY" -q
+    if [[ -f "$CLIENT_KEY" ]]; then
+        ok "Client embed keypair generated at $CLIENT_KEY"
+        ok "Client public key at ${CLIENT_KEY}.pub"
     else
-        warn "Could not extract fingerprint — check that ssh-keygen >= 6.8 is installed"
+        fail "ssh-keygen failed — run manually: ssh-keygen -t ed25519 -N '' -f $CLIENT_KEY"
+    fi
+fi
+
+# Ensure the client's public key is in NHAS's authorized_controllee_keys so
+# the server trusts callbacks from clients built with this keypair
+CTRL_KEYS="$WORKSPACE/bin/authorized_controllee_keys"
+if [[ -f "${CLIENT_KEY}.pub" ]]; then
+    run_as_user mkdir -p "$(dirname "$CTRL_KEYS")"
+    _CPUB=$(cat "${CLIENT_KEY}.pub")
+    if grep -qF "$_CPUB" "$CTRL_KEYS" 2>/dev/null; then
+        ok "Client public key already in authorized_controllee_keys"
+    else
+        run_as_user bash -c "echo '$_CPUB' >> '$CTRL_KEYS'"
+        ok "Client public key added to authorized_controllee_keys"
     fi
 fi
 
@@ -332,13 +363,19 @@ done
     ok "bin/server ✓ $(du -h "$WORKSPACE/bin/server" | cut -f1)" || \
     warn "bin/server not built"
 
-_SKEY="$WORKSPACE/bin/server_ed25519"
+_SKEY="$WORKSPACE/bin/id_ed25519"
 if [[ -f "$_SKEY" ]]; then
-    _FP=$(ssh-keygen -lf "$_SKEY" 2>/dev/null | awk '{print $2}')
-    ok "bin/server_ed25519 ✓  fingerprint: ${_FP}"
+    _FPB=$(ssh-keygen -lf "$_SKEY" -E sha256 2>/dev/null | awk '{print $2}' | sed 's/SHA256://')
+    _FPH=$(printf '%s==' "$_FPB" | base64 -d 2>/dev/null | xxd -p | tr -d '\n')
+    ok "bin/id_ed25519 ✓  fingerprint (hex): ${_FPH}"
 else
-    fail "bin/server_ed25519 ✗ MISSING — nhas-build.sh will produce clients that cannot connect"
+    fail "bin/id_ed25519 ✗ MISSING — clients will not connect to server"
 fi
+
+_CKEY="$WORKSPACE/internal/client/keys/private_key"
+[[ -f "$_CKEY" ]] && \
+    ok "internal/client/keys/private_key ✓" || \
+    fail "internal/client/keys/private_key ✗ MISSING — all client builds will fail"
 
 # ─── done ────────────────────────────────────────────────────────────
 echo

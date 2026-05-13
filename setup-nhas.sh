@@ -149,6 +149,48 @@ else
     fi
 fi
 
+# ─── pre-generate server host key ────────────────────────────────────
+# The server creates this automatically on first run, but nhas-build.sh
+# needs the fingerprint at *compile time* so it can be baked into clients.
+# Generating it here guarantees builds always succeed even before the
+# server has been started for the first time.
+banner "Pre-generating server host key (needed for RSSH_FINGERPRINT)"
+SERVER_KEY="$WORKSPACE/bin/server_ed25519"
+run_as_user mkdir -p "$(dirname "$SERVER_KEY")"
+
+if [[ -f "$SERVER_KEY" ]]; then
+    ok "Server host key already exists at $SERVER_KEY"
+else
+    # Generate a standard ed25519 SSH host key — same format reverse_ssh expects
+    run_as_user ssh-keygen -t ed25519 -N "" -f "$SERVER_KEY" -q
+    if [[ -f "$SERVER_KEY" ]]; then
+        ok "Server host key generated at $SERVER_KEY"
+    else
+        fail "ssh-keygen failed — clients will not have a fingerprint to verify"
+        warn "Run manually: ssh-keygen -t ed25519 -N '' -f $SERVER_KEY"
+    fi
+fi
+
+# Remove the .pub file ssh-keygen leaves behind; NHAS only uses the private key file
+# and having an extra .pub can confuse scripts that glob for keys.
+[[ -f "${SERVER_KEY}.pub" ]] && run_as_user rm -f "${SERVER_KEY}.pub"
+
+# Display fingerprint so the operator can record it
+if [[ -f "$SERVER_KEY" ]]; then
+    FP=$(ssh-keygen -lf "$SERVER_KEY" 2>/dev/null | awk '{print $2}')
+    if [[ -n "$FP" ]]; then
+        ok "Server fingerprint: ${FP}"
+        echo ""
+        echo -e "    ${C}RSSH_FINGERPRINT=${FP}${N}"
+        echo -e "    ${Y}This fingerprint is baked into every client at build time.${N}"
+        echo -e "    ${Y}Do NOT delete $SERVER_KEY or clients from the current${N}"
+        echo -e "    ${Y}build batch will refuse to connect to the server.${N}"
+        echo -e "    ${Y}To rotate: delete the key, rerun setup-nhas.sh, then rebuild clients.${N}"
+    else
+        warn "Could not extract fingerprint — check that ssh-keygen >= 6.8 is installed"
+    fi
+fi
+
 # ─── install garble (must be as user — goes to ~/go/bin) ─────────────
 banner "Installing garble (obfuscation — installs to ~/go/bin)"
 if [[ -f "$GOBIN/garble" ]]; then
@@ -289,6 +331,14 @@ done
 [[ -f "$WORKSPACE/bin/server" ]] && \
     ok "bin/server ✓ $(du -h "$WORKSPACE/bin/server" | cut -f1)" || \
     warn "bin/server not built"
+
+_SKEY="$WORKSPACE/bin/server_ed25519"
+if [[ -f "$_SKEY" ]]; then
+    _FP=$(ssh-keygen -lf "$_SKEY" 2>/dev/null | awk '{print $2}')
+    ok "bin/server_ed25519 ✓  fingerprint: ${_FP}"
+else
+    fail "bin/server_ed25519 ✗ MISSING — nhas-build.sh will produce clients that cannot connect"
+fi
 
 # ─── done ────────────────────────────────────────────────────────────
 echo

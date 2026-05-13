@@ -147,14 +147,29 @@ echo "  ${GREEN}[+]${NC} Data dir:      ${YELLOW}${DATA_DIR}${NC}"
 echo "  ${GREEN}[+]${NC} Exploits:      ${YELLOW}${EXPLOIT_DIR}${NC}"
 echo ""
 
-[[ "$PORT" != "$DEFAULT_PORT" ]] && {
+SOCAT_PID=""
+if [[ "$PORT" != "$DEFAULT_PORT" ]]; then
     echo "${BOLD}=============================================="
-    echo "  PORT FORWARD REQUIRED"
+    echo "  PORT FORWARD"
     echo "==============================================${NC}"
-    echo "  ${RED}[!]${NC} Callback port ${PORT} differs from listen port ${DEFAULT_PORT}."
-    printf "  ${YELLOW}%s${NC}\n" "sudo socat TCP-LISTEN:${PORT},fork,reuseaddr TCP:localhost:${DEFAULT_PORT}"
+    echo "  ${CYAN}[*]${NC} Callback port ${PORT} ≠ listen port ${DEFAULT_PORT} — starting socat in background"
+    if command -v socat &>/dev/null; then
+        socat TCP-LISTEN:${PORT},fork,reuseaddr TCP:localhost:${DEFAULT_PORT} &
+        SOCAT_PID=$!
+        sleep 0.3
+        if kill -0 "$SOCAT_PID" 2>/dev/null; then
+            echo "  ${GREEN}[+]${NC} socat running (PID ${SOCAT_PID})  ${GRAY}:${PORT} → localhost:${DEFAULT_PORT}${NC}"
+        else
+            echo "  ${RED}[!]${NC} socat failed to start — agents on port ${PORT} will not connect"
+            echo "  ${YELLOW}    Manual: sudo socat TCP-LISTEN:${PORT},fork,reuseaddr TCP:localhost:${DEFAULT_PORT}${NC}"
+            SOCAT_PID=""
+        fi
+    else
+        echo "  ${RED}[!]${NC} socat not found — install it or forward manually:"
+        printf "  ${YELLOW}%s${NC}\n" "sudo socat TCP-LISTEN:${PORT},fork,reuseaddr TCP:localhost:${DEFAULT_PORT}"
+    fi
     echo ""
-}
+fi
 
 echo "${BOLD}=============================================="
 echo "  QUICK BUILD - DIRECT AGENTS  [ ${TUN0_IP}:${PORT} ]"
@@ -301,9 +316,14 @@ _LINUX_BAK=""; _WIN_BAK=""
 
 _nhas_cleanup() {
     echo ''
+    # Stop socat port forward if we started it
+    if [[ -n "${SOCAT_PID:-}" ]] && kill -0 "$SOCAT_PID" 2>/dev/null; then
+        kill "$SOCAT_PID" 2>/dev/null
+        wait "$SOCAT_PID" 2>/dev/null
+    fi
     # Stop the file server (tools.py / DualServe) if we started it
     if [[ -n "${TOOLS_PID:-}" ]] && kill -0 "$TOOLS_PID" 2>/dev/null; then
-        echo "${GREEN}[+]${NC} Stopping file server (PID ${TOOLS_PID})..."
+        pkill -P "$TOOLS_PID" 2>/dev/null
         kill "$TOOLS_PID" 2>/dev/null
         wait "$TOOLS_PID" 2>/dev/null
     fi
@@ -542,9 +562,6 @@ echo ""
 echo "${BOLD}=============================================="
 echo "  QUICK CONNECT EXAMPLES"
 echo "==============================================${NC}"
-echo ""
-echo "  ${CYAN}# Open catcher console${NC}"
-echo "  ${YELLOW}ssh rssh${NC}"
 echo ""
 echo "  ${CYAN}# Linux target${NC}"
 echo "  ${YELLOW}ssh -J rssh <id>${NC}"

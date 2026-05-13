@@ -176,7 +176,7 @@ Key: `RSSH_FINGERPRINT` (the server's `bin/id_ed25519` SHA256 in hex) is automat
 
 ### `nhas-start.sh`
 
-The main launch script. Prompts for interface, ports, and agent names, then prints:
+The main launch script. Fully portable — all scripts auto-detect their own install location via `BASH_SOURCE[0]`, so they work regardless of username, machine, or clone path. Override with `NHAS_DIR=/custom/path` if needed. Prompts for interface, ports, and agent names, then prints:
 
 - Agent summary (what's built, sizes)
 - Configuration block
@@ -184,8 +184,9 @@ The main launch script. Prompts for interface, ports, and agent names, then prin
 - Auto-builds `nhasLinuxAmd64Direct` and `nhasWinAmd64Direct.exe` with your current IP baked in (restored to previous versions on exit)
 - Every agent download command (13 Linux variants, 14 Windows variants, base64 one-liners, SMB paths)
 - Persistence commands (crontab, bashrc, systemd, registry, scheduled tasks, WMI)
-- Starts tools.py (HTTP+SMB) in the background
-- Starts NHAS server (foreground, Ctrl+C kills everything cleanly)
+- Auto-starts socat port forward in the background if callback port ≠ 3232
+- Starts tools.py (HTTP+SMB) silently in the background
+- Starts NHAS server (foreground, Ctrl+C kills server + socat + tools.py cleanly)
 
 ### `nhas-tools.sh`
 
@@ -193,7 +194,7 @@ Thin wrapper around `tools.py`. Called automatically by `nhas-start.sh`.
 
 - Finds `tools.py` next to itself, in the sibling repo, or common paths
 - Falls back to `python3 -m http.server` if `tools.py` is missing
-- Filters all tools.py output — only completed downloads `[DONE]`, uploads `[UP]`, failures `[FAIL]`, and captured NTLM hashes `[SMB][HASH]` appear in your terminal
+- Filters all tools.py output — only `[TRY]` (download started), `[DONE]` (completed), `[UP]` (upload), `[FAIL]`, and `[SMB][HASH]` (captured NTLM hash) appear in your terminal; the startup banner, file listing, and progress bars are suppressed
 - To update the file server: replace `tools.py`, this script never needs to change
 
 Override `tools.py` location:
@@ -212,7 +213,7 @@ TOOLS_PY=/path/to/tools.py nhasup
 
 ### `setup-tools.sh`
 
-Installs `tools.py` dependencies on a fresh Kali:
+Installs `tools.py` dependencies. Supports apt (Kali/Debian/Ubuntu), pacman (Arch/CachyOS/Manjaro), dnf (Fedora/RHEL), and zypper (openSUSE):
 
 ```bash
 bash setup-tools.sh
@@ -273,7 +274,12 @@ sudo fuser -k 445/tcp
 Ensure you're using the latest `nhas-tools.sh` (includes `PYTHONUNBUFFERED=1`). Without it, Python buffers output when stdout is piped and `[DONE]` lines never appear.
 
 **Port forward needed (callback port ≠ listen port):**
-`nhas-start.sh` detects this and prints the socat forward command automatically.
+`nhas-start.sh` detects this automatically and starts socat in the background:
+```
+[+] socat running (PID 12345)  :4444 → localhost:3232
+    Kill: pkill -f "socat.*4444"  or  kill 12345
+```
+If socat is not installed it prints the manual command instead.
 
 ---
 

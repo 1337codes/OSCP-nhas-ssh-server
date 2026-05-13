@@ -37,7 +37,7 @@ TARGET_USER="${SUDO_USER:-$USER}"
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 # Workspace = this repo's directory. NHAS source is laid down alongside the
 # wrapper scripts. Override with WORKSPACE=/some/path before running.
-WORKSPACE="${WORKSPACE:-/home/alien/Desktop/Tools/OSCP-nhas-ssh-server}"
+WORKSPACE="${WORKSPACE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)}"
 NHAS_REPO="https://github.com/NHAS/reverse_ssh.git"
 GOBIN="$TARGET_HOME/go/bin"
 

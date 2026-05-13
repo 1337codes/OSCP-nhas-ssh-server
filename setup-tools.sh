@@ -29,18 +29,28 @@ fi
 
 banner "DualServe (tools.py) installer"
 
-# ─── apt update ──────────────────────────────────────────────────────
-banner "Updating package index"
-$SUDO apt-get update -qq
-ok "apt index updated"
-
-# ─── core deps ───────────────────────────────────────────────────────
-banner "Installing core dependencies"
-$SUDO apt-get install -y -qq \
-    python3 \
-    python3-pip \
-    python3-impacket
-ok "python3 + impacket installed"
+# ─── package manager: python3 + pip + impacket ───────────────────────
+banner "Installing python3, pip, and impacket"
+if command -v pacman &>/dev/null; then
+    $SUDO pacman -Sy --needed --noconfirm python python-pip python-impacket
+    ok "python3 + pip + impacket installed (pacman)"
+elif command -v apt-get &>/dev/null; then
+    $SUDO apt-get update -qq
+    $SUDO apt-get install -y -qq python3 python3-pip python3-impacket
+    ok "python3 + pip + impacket installed (apt)"
+elif command -v dnf &>/dev/null; then
+    $SUDO dnf install -y python3 python3-pip
+    $SUDO pip3 install --break-system-packages impacket
+    ok "python3 + pip + impacket installed (dnf)"
+elif command -v zypper &>/dev/null; then
+    $SUDO zypper --non-interactive install python3 python3-pip
+    $SUDO pip3 install --break-system-packages impacket
+    ok "python3 + pip + impacket installed (zypper)"
+else
+    fail "No supported package manager found (apt-get, pacman, dnf, zypper)."
+    fail "Install python3, pip, and impacket manually then rerun."
+    exit 1
+fi
 
 # ─── verify the SMB binary lands in PATH ─────────────────────────────
 banner "Verifying impacket-smbserver"

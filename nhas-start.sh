@@ -3,7 +3,7 @@
 # NHAS Reverse SSH Server Startup Script
 #
 
-NHAS_DIR="${NHAS_DIR:-/home/alien/Desktop/Tools/OSCP-nhas-ssh-server}"
+NHAS_DIR="${NHAS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)}"
 DATA_DIR="$NHAS_DIR/bin"
 EXPLOIT_DIR="$NHAS_DIR/bin/exploits"
 SERVER_BIN="$DATA_DIR/server"

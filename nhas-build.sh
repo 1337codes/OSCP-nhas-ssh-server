@@ -4,7 +4,7 @@
 # Output: /home/alien/Desktop/Tools/OSCP-nhas-ssh-server/bin/exploits/
 #
 
-NHAS_DIR="${NHAS_DIR:-/home/alien/Desktop/Tools/OSCP-nhas-ssh-server}"
+NHAS_DIR="${NHAS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)}"
 OUTPUT_DIR="$NHAS_DIR/bin/exploits"
 DEFAULT_PORT="3232"
 

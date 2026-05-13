@@ -62,15 +62,12 @@ if [[ -z "$TOOLS_PY" ]]; then
     exec python3 -m http.server "$HTTP_PORT" -d "$SERVE_DIR"
 fi
 
-# ─── Launch (silent: only transfer events reach the terminal) ────────────────
-# Kill the python3|grep pipeline when this wrapper exits (SIGTERM from nhas-start)
-trap 'kill $(jobs -p) 2>/dev/null; wait' EXIT INT TERM
+# ─── Launch ──────────────────────────────────────────────────────────────────
+echo "${GREEN}[+]${NC} DualServe (HTTP + SMB)"
+echo "    Script : $TOOLS_PY"
+echo "    HTTP   : 0.0.0.0:${HTTP_PORT}"
+echo "    SMB    : 0.0.0.0:445  (share: ${CYAN}evil${NC})"
+echo "    Dir    : $SERVE_DIR"
+echo ""
 
-# PYTHONUNBUFFERED=1: force Python to flush every print() immediately.
-# Without it stdout is block-buffered when piped — [DONE]/[TRY] lines
-# are held in an 8KB buffer and never appear during a session.
-# Filter: TRY = download starting, DONE = complete, UP = upload, FAIL, SMB HASH
-PYTHONUNBUFFERED=1 python3 "$TOOLS_PY" -dir "$SERVE_DIR" -p "$HTTP_PORT" -smb 2>&1 |     grep --line-buffered -E '\[(TRY|DONE|UP|FAIL|SAVE)\]|\[SMB\].*\[HASH\]'
-
-# keep wrapper alive so nhas-start can track and kill us
-wait
+exec python3 "$TOOLS_PY" -dir "$SERVE_DIR" -p "$HTTP_PORT" -smb

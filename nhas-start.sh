@@ -34,7 +34,6 @@ if [[ -f "$CLIENT_PUBKEY" ]]; then
     fi
 fi
 
-clear
 echo ""
 echo "${CYAN}"
 cat << 'EOF'

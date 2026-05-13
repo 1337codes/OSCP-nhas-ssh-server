@@ -159,7 +159,7 @@ if [[ "$PORT" != "$DEFAULT_PORT" ]]; then
         sleep 0.3
         if kill -0 "$SOCAT_PID" 2>/dev/null; then
             echo "  ${GREEN}[+]${NC} socat running (PID ${SOCAT_PID})  ${GRAY}:${PORT} → localhost:${DEFAULT_PORT}${NC}"
-            echo "  ${GRAY}    Kill: pkill -f "socat.*${PORT}"  or  kill ${SOCAT_PID}${NC}"
+            echo "  ${GRAY}    Kill: pkill -f \"socat.*${PORT}\"  or  kill ${SOCAT_PID}${NC}"
         else
             echo "  ${RED}[!]${NC} socat failed — port ${PORT} may already be in use"
             printf "  ${YELLOW}    Manual: sudo socat TCP-LISTEN:${PORT},fork,reuseaddr TCP:localhost:${DEFAULT_PORT}${NC}\n"

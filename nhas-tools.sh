@@ -62,12 +62,14 @@ if [[ -z "$TOOLS_PY" ]]; then
     exec python3 -m http.server "$HTTP_PORT" -d "$SERVE_DIR"
 fi
 
-# ─── Launch ──────────────────────────────────────────────────────────────────
-echo "${GREEN}[+]${NC} DualServe (HTTP + SMB)"
-echo "    Script : $TOOLS_PY"
-echo "    HTTP   : 0.0.0.0:${HTTP_PORT}"
-echo "    SMB    : 0.0.0.0:445  (share: ${CYAN}evil${NC})"
-echo "    Dir    : $SERVE_DIR"
-echo ""
+# ─── Launch (silent — only transfer events surface) ──────────────────────────
+# Trap kills python3+grep children when nhas-start sends SIGTERM on exit
+trap 'kill $(jobs -p) 2>/dev/null; wait' EXIT INT TERM
 
-exec python3 "$TOOLS_PY" -dir "$SERVE_DIR" -p "$HTTP_PORT" -smb
+# PYTHONUNBUFFERED=1: Python flushes every print() immediately when piped.
+# Without it stdout is block-buffered and [TRY]/[DONE] lines never appear.
+# Filter: TRY=starting, DONE=complete, UP=upload, FAIL=error, SMB HASH=NTLM
+PYTHONUNBUFFERED=1 python3 "$TOOLS_PY" -dir "$SERVE_DIR" -p "$HTTP_PORT" -smb 2>&1 |     grep --line-buffered -E '\[(TRY|DONE|UP|FAIL|SAVE)\]|\[SMB\].*\[HASH\]'
+
+# Keep wrapper alive so nhas-start can track and kill by PID
+wait

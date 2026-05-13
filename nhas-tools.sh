@@ -66,10 +66,11 @@ fi
 # Kill the python3|grep pipeline when this wrapper exits (SIGTERM from nhas-start)
 trap 'kill $(jobs -p) 2>/dev/null; wait' EXIT INT TERM
 
-# PYTHONUNBUFFERED=1 forces Python to flush every print() immediately.
-# Without it stdout is block-buffered when piped and [DONE]/[UP] lines
+# PYTHONUNBUFFERED=1: force Python to flush every print() immediately.
+# Without it stdout is block-buffered when piped — [DONE]/[TRY] lines
 # are held in an 8KB buffer and never appear during a session.
-PYTHONUNBUFFERED=1 python3 "$TOOLS_PY" -dir "$SERVE_DIR" -p "$HTTP_PORT" -smb 2>&1 |     grep --line-buffered -E '\[(DONE|UP|FAIL|SAVE)\]|\[SMB\].*\[HASH\]'
+# Filter: TRY = download starting, DONE = complete, UP = upload, FAIL, SMB HASH
+PYTHONUNBUFFERED=1 python3 "$TOOLS_PY" -dir "$SERVE_DIR" -p "$HTTP_PORT" -smb 2>&1 |     grep --line-buffered -E '\[(TRY|DONE|UP|FAIL|SAVE)\]|\[SMB\].*\[HASH\]'
 
 # keep wrapper alive so nhas-start can track and kill us
 wait
